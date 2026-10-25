@@ -1,11 +1,10 @@
 """Tests for the Student Grade Analytics Tool.
 
 Run these tests from the project folder with:
-    pytest -v
+    python -m pytest -v
 """
 
 import json
-from collections import defaultdict
 
 import pytest
 
@@ -94,3 +93,191 @@ def test_calculate_statistics_for_unknown_major_raises_error():
 
 def test_load_students_reads_csv_and_calculates_average(tmp_path):
     csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        "Amina,Computer Science,80,90,70,80\n"
+        "Brian,Computer Science,60,70,80,70\n",
+        encoding="utf-8",
+    )
+
+    main.load_students(csv_file)
+
+    assert len(main.majors["Computer Science"]) == 2
+    assert main.majors["Computer Science"][0].name == "Amina"
+    assert main.majors["Computer Science"][0].average == 80.0
+
+
+def test_load_students_rejects_missing_required_columns(tmp_path):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1\n"
+        "Amina,Computer Science,80\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Missing CSV columns"):
+        main.load_students(csv_file)
+
+
+def test_load_students_rejects_grade_outside_zero_to_one_hundred(tmp_path):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        "Amina,Computer Science,105,90,70,88.33\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        main.load_students(csv_file)
+
+
+def test_load_students_rejects_non_numeric_grade(tmp_path):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        "Amina,Computer Science,eighty,90,70,80\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be numeric"):
+        main.load_students(csv_file)
+
+
+def test_load_students_warns_and_uses_calculated_average(tmp_path, capsys):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        "Amina,Computer Science,80,90,70,50\n",
+        encoding="utf-8",
+    )
+
+    main.load_students(csv_file)
+
+    captured = capsys.readouterr()
+
+    assert "Warning" in captured.out
+    assert main.majors["Computer Science"][0].average == 80.0
+
+
+def test_load_students_missing_file_raises_custom_exception(tmp_path):
+    missing_file = tmp_path / "does_not_exist.csv"
+
+    with pytest.raises(main.StudentFileNotFoundError):
+        main.load_students(missing_file)
+
+
+def test_generate_rankings_json_saves_highest_average_first(
+    tmp_path, monkeypatch
+):
+    add_sample_students()
+    monkeypatch.chdir(tmp_path)
+
+    main.generate_rankings_json("Computer Science")
+
+    report_file = tmp_path / "reports" / "Computer_Science_rankings.json"
+    report = json.loads(report_file.read_text(encoding="utf-8"))
+
+    assert report[0]["name"] == "Amina"
+    assert report[0]["rank"] == 1
+    assert report[1]["name"] == "Brian"
+    assert report[1]["rank"] == 2
+
+
+def test_generate_json_report_saves_each_major(tmp_path, monkeypatch):
+    add_sample_students()
+    monkeypatch.chdir(tmp_path)
+
+    main.generate_json_report()
+
+    report_file = tmp_path / "reports" / "grade_report.json"
+    report = json.loads(report_file.read_text(encoding="utf-8"))
+
+    assert "Computer Science" in report
+    assert "Business" in report
+    assert report["Computer Science"]["overall_average"] == 75.0
+
+
+def test_show_grade_distributions_handles_unknown_major(
+    monkeypatch, capsys
+):
+    add_sample_students()
+    monkeypatch.setattr("builtins.input", lambda prompt: "Medicine")
+
+    main.show_grade_distributions()
+
+    captured = capsys.readouterr()
+
+    assert "Major not found." in captured.out
+
+
+def test_load_students_rejects_row_with_extra_values(tmp_path):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        "Amina,Computer Science,80,90,70,80,extra\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="too many values"):
+        main.load_students(csv_file)
+
+
+def test_load_students_rejects_row_with_missing_values(tmp_path):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        "Amina,Computer Science,80,90,70\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="too few values"):
+        main.load_students(csv_file)
+
+
+def test_load_students_rejects_duplicate_header_names(tmp_path):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,course3\n"
+        "Amina,Computer Science,80,90,70,80\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="duplicate column names"):
+        main.load_students(csv_file)
+
+
+def test_load_students_rejects_empty_required_field(tmp_path):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        "Amina,Computer Science,80,,70,80\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="course2.*cannot be empty"):
+        main.load_students(csv_file)
+
+
+@pytest.mark.parametrize("invalid_grade", ["nan", "inf", "-inf"])
+def test_load_students_rejects_nan_and_infinity(tmp_path, invalid_grade):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        f"Amina,Computer Science,{invalid_grade},90,70,80\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="finite numbers"):
+        main.load_students(csv_file)
+
+
+def test_load_students_rejects_malformed_csv_quoting(tmp_path):
+    csv_file = tmp_path / "students.csv"
+    csv_file.write_text(
+        "name,major,course1,course2,course3,average\n"
+        '"Amina,Computer Science,80,90,70,80',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="CSV file is malformed"):
+        main.load_students(csv_file)
