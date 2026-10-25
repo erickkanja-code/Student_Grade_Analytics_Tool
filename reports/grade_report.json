@@ -1,0 +1,42 @@
+{
+    "Software Engineering": {
+        "course_averages": {
+            "course1": 60.0,
+            "course2": 60.0,
+            "course3": 30.0
+        },
+        "overall_average": 50.0,
+        "grade_distributions": {
+            "course1": {
+                "71-80": 1,
+                "0-40": 1
+            },
+            "course2": {
+                "61-70": 1,
+                "41-50": 1
+            },
+            "course3": {
+                "0-40": 2
+            }
+        }
+    },
+    "Commerse": {
+        "course_averages": {
+            "course1": 80.0,
+            "course2": 70.0,
+            "course3": 40.0
+        },
+        "overall_average": 63.33,
+        "grade_distributions": {
+            "course1": {
+                "71-80": 1
+            },
+            "course2": {
+                "61-70": 1
+            },
+            "course3": {
+                "0-40": 1
+            }
+        }
+    }
+}
