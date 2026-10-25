@@ -1,10 +1,18 @@
 
 import csv
 import json
+from pathlib import Path
 from dataclasses import dataclass
 from collections import defaultdict, deque, Counter
-from pathlib import Path
+from statistics import median
+from typing import List, Dict, Optional, Union, TypedDict
+
 from exceptions import StudentFileNotFoundError, StudentFilePermissionError
+
+
+# A grade can be an integer or a decimal number.
+Grade = Union[int, float]
+
 
 @dataclass
 class Student:
@@ -21,11 +29,44 @@ class Course:
     total: float
     no_of_students: int
 
-    def calculate_average(self):
+    def calculate_average(self) -> float:
         return self.total / self.no_of_students
 
 
-def get_grade_distributions_per_course(course_results):
+# Describe the structure of the statistics in our JSON report.
+class CourseAverages(TypedDict):
+    course1: float
+    course2: float
+    course3: float
+
+
+class GradeDistributions(TypedDict):
+    course1: Dict[str, int]
+    course2: Dict[str, int]
+    course3: Dict[str, int]
+
+
+class MajorReport(TypedDict):
+    course_averages: CourseAverages
+    overall_average: float
+    course_medians: CourseAverages
+    course_modes: Dict[str, Optional[Grade]]
+    grade_distributions: GradeDistributions
+
+
+class RankingEntry(TypedDict):
+    rank: int
+    name: str
+    major: str
+    course1: float
+    course2: float
+    course3: float
+    average: float
+
+
+def get_grade_distributions_per_course(
+    course_results: Union[List[Grade], deque]
+) -> Dict[str, int]:
     grade_distribution = Counter(
         "0-40" if 0 <= int(grade) <= 40
         else "41-50" if int(grade) <= 50
@@ -35,11 +76,29 @@ def get_grade_distributions_per_course(course_results):
         else "81-100"
         for grade in course_results
     )
+
     return dict(grade_distribution)
 
 
+def calculate_median(
+    grades: Union[List[Grade], deque]
+) -> float:
+    return median(grades)
 
-majors = defaultdict(list)
+
+def calculate_mode(
+    grades: Union[List[Grade], deque]
+) -> Optional[Grade]:
+    grade_counts = Counter(grades)
+
+    if not grade_counts:
+        return None
+
+    return grade_counts.most_common(1)[0][0]
+
+
+majors: Dict[str, List[Student]] = defaultdict(list)
+
 
 try:
     with open("test.csv", mode="r", encoding="utf-8") as file:
@@ -68,7 +127,7 @@ except PermissionError:
     )
 
 
-def calculate_major_statistics(major):
+def calculate_major_statistics(major: str) -> MajorReport:
     course_1_results = deque()
     course_2_results = deque()
     course_3_results = deque()
@@ -82,9 +141,18 @@ def calculate_major_statistics(major):
     c2_sum = sum(int(result) for result in course_2_results)
     c3_sum = sum(int(result) for result in course_3_results)
 
-    course_1 = Course(c1_sum, len(course_1_results))
-    course_2 = Course(c2_sum, len(course_2_results))
-    course_3 = Course(c3_sum, len(course_3_results))
+    course_1 = Course(
+        total=c1_sum,
+        no_of_students=len(course_1_results)
+    )
+    course_2 = Course(
+        total=c2_sum,
+        no_of_students=len(course_2_results)
+    )
+    course_3 = Course(
+        total=c3_sum,
+        no_of_students=len(course_3_results)
+    )
 
     course_1_average = course_1.calculate_average()
     course_2_average = course_2.calculate_average()
@@ -94,6 +162,18 @@ def calculate_major_statistics(major):
         course_1_average + course_2_average + course_3_average
     ) / 3
 
+    course_medians: CourseAverages = {
+        "course1": calculate_median(course_1_results),
+        "course2": calculate_median(course_2_results),
+        "course3": calculate_median(course_3_results)
+    }
+
+    course_modes: Dict[str, Optional[Grade]] = {
+        "course1": calculate_mode(course_1_results),
+        "course2": calculate_mode(course_2_results),
+        "course3": calculate_mode(course_3_results)
+    }
+
     return {
         "course_averages": {
             "course1": course_1_average,
@@ -101,66 +181,75 @@ def calculate_major_statistics(major):
             "course3": course_3_average
         },
         "overall_average": round(major_average, 2),
+        "course_medians": course_medians,
+        "course_modes": course_modes,
         "grade_distributions": {
-            "course1": get_grade_distributions_per_course(course_1_results),
-            "course2": get_grade_distributions_per_course(course_2_results),
-            "course3": get_grade_distributions_per_course(course_3_results)
+            "course1": get_grade_distributions_per_course(
+                course_1_results
+            ),
+            "course2": get_grade_distributions_per_course(
+                course_2_results
+            ),
+            "course3": get_grade_distributions_per_course(
+                course_3_results
+            )
         }
     }
 
 
-def show_averages():
+def show_averages() -> None:
     for major in majors:
-        statistics = calculate_major_statistics(major)
+        stats = calculate_major_statistics(major)
 
-        print(f"\n{major} course 1: {statistics['course_averages']['course1']}")
-        print(f"{major} course 2: {statistics['course_averages']['course2']}")
-        print(f"{major} course 3: {statistics['course_averages']['course3']}")
-        print(f"{major}: {statistics['overall_average']}")
+        print(f"\nStatistics for {major}")
+        print("------------------------------")
+
+        print(
+            f"Course 1 average: "
+            f"{stats['course_averages']['course1']}"
+        )
+        print(
+            f"Course 2 average: "
+            f"{stats['course_averages']['course2']}"
+        )
+        print(
+            f"Course 3 average: "
+            f"{stats['course_averages']['course3']}"
+        )
+        print(f"Overall major average: {stats['overall_average']}")
+
+        print("Course medians:", stats["course_medians"])
+        print("Course modes:", stats["course_modes"])
 
 
-def generate_rankings(major):
+def generate_rankings(major: str) -> None:
     ranked_list = sorted(
         majors[major],
         key=lambda student: student.average,
         reverse=True
     )
 
-    print("-------------------- Ranked Performance List --------------------")
-    print("   Name  Course 1  Course 2  Course 3  Average")
+    print("\n-------------------- Ranked Performance List --------------------")
+    print("Rank  Name  Course 1  Course 2  Course 3  Average")
 
     for index, student in enumerate(ranked_list, start=1):
         print(
-            f"{index}. {student.name}  {student.course1}  "
-            f"{student.course2}  {student.course3}  {student.average}"
+            f"{index}. {student.name}  "
+            f"{student.course1}  "
+            f"{student.course2}  "
+            f"{student.course3}  "
+            f"{student.average}"
         )
 
 
-def generate_json_report():
-    report = {}
-
-    for major in majors:
-        report[major] = calculate_major_statistics(major)
-
-    report_path = Path("reports")
-    report_path.mkdir(exist_ok=True)
-
-    file_path = report_path / "grade_report.json"
-
-    with open(file_path, mode="w", encoding="utf-8") as file:
-        json.dump(report, file, indent=4)
-
-    print(f"JSON report saved to: {file_path}")
-
-
-def generate_rankings_json(major):
+def generate_rankings_json(major: str) -> None:
     ranked_list = sorted(
         majors[major],
         key=lambda student: student.average,
         reverse=True
     )
 
-    report = []
+    report: List[RankingEntry] = []
 
     for index, student in enumerate(ranked_list, start=1):
         report.append({
@@ -176,7 +265,9 @@ def generate_rankings_json(major):
     report_path = Path("reports")
     report_path.mkdir(exist_ok=True)
 
-    file_path = report_path / f"{major.replace(' ', '_')}_rankings.json"
+    file_path = report_path / (
+        f"{major.replace(' ', '_')}_rankings.json"
+    )
 
     with open(file_path, mode="w", encoding="utf-8") as file:
         json.dump(report, file, indent=4)
@@ -184,8 +275,55 @@ def generate_rankings_json(major):
     print(f"Rankings report saved to: {file_path}")
 
 
+def generate_json_report() -> None:
+    report: Dict[str, MajorReport] = {}
 
-def show_menu():
+    for major in majors:
+        report[major] = calculate_major_statistics(major)
+
+    report_path = Path("reports")
+    report_path.mkdir(exist_ok=True)
+
+    file_path = report_path / "grade_report.json"
+
+    with open(file_path, mode="w", encoding="utf-8") as file:
+        json.dump(report, file, indent=4)
+
+    print(f"Grade report saved to: {file_path}")
+
+
+def show_grade_distributions() -> None:
+    major = input("Enter the major: ")
+
+    if major not in majors:
+        print("Major not found.")
+        return
+
+    students = majors[major]
+
+    print(f"\nGrade distributions for {major}")
+
+    print(
+        "Course 1:",
+        get_grade_distributions_per_course(
+            [student.course1 for student in students]
+        )
+    )
+    print(
+        "Course 2:",
+        get_grade_distributions_per_course(
+            [student.course2 for student in students]
+        )
+    )
+    print(
+        "Course 3:",
+        get_grade_distributions_per_course(
+            [student.course3 for student in students]
+        )
+    )
+
+
+def show_menu() -> None:
     while True:
         print("\n===== Student Grade Analytics Tool =====")
         print("1. View course and major averages")
@@ -209,27 +347,7 @@ def show_menu():
                 print("Major not found.")
 
         elif choice == "3":
-            major = input("Enter the major: ")
-
-            if major in majors:
-                students = majors[major]
-
-                print("\nCourse 1 grade distribution:")
-                print(get_grade_distributions_per_course(
-                    [student.course1 for student in students]
-                ))
-
-                print("\nCourse 2 grade distribution:")
-                print(get_grade_distributions_per_course(
-                    [student.course2 for student in students]
-                ))
-
-                print("\nCourse 3 grade distribution:")
-                print(get_grade_distributions_per_course(
-                    [student.course3 for student in students]
-                ))
-            else:
-                print("Major not found.")
+            show_grade_distributions()
 
         elif choice == "4":
             generate_json_report()
@@ -239,14 +357,15 @@ def show_menu():
             break
 
         else:
-            print("Invalid option. Please choose 1, 2, 3, 4, or 5.")
+            print("Invalid choice. Please try again.")
 
 
-try:
-    show_menu()
+if __name__ == "__main__":
+    try:
+        show_menu()
 
-except StudentFileNotFoundError as error:
-    print(f"Error: {error}")
+    except StudentFileNotFoundError as error:
+        print(f"Error: {error}")
 
-except StudentFilePermissionError as error:
-    print(f"Error: {error}")
+    except StudentFilePermissionError as error:
+        print(f"Error: {error}")

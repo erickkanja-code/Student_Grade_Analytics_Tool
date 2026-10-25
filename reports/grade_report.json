@@ -18,6 +18,16 @@
             "course3": {
                 "0-40": 2
             }
+        },
+        "course_medians": {
+            "course1": 60.0,
+            "course2": 60.0,
+            "course3": 30.0
+        },
+        "course_modes": {
+            "course1": 80.0,
+            "course2": 70.0,
+            "course3": 40.0
         }
     },
     "Commerse": {
@@ -37,6 +47,16 @@
             "course3": {
                 "0-40": 1
             }
+        },
+        "course_medians": {
+            "course1": 80.0,
+            "course2": 70.0,
+            "course3": 40.0
+        },
+        "course_modes": {
+            "course1": 80.0,
+            "course2": 70.0,
+            "course3": 40.0
         }
     }
 }
