@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from collections import defaultdict, deque, Counter
 from pathlib import Path
-
+from exceptions import StudentFileNotFoundError, StudentFilePermissionError
 
 @dataclass
 class Student:
@@ -38,21 +38,34 @@ def get_grade_distributions_per_course(course_results):
     return dict(grade_distribution)
 
 
+
 majors = defaultdict(list)
 
-with open("test.csv", mode="r", newline="", encoding="utf-8") as file:
-    rows = csv.DictReader(file)
+try:
+    with open("test.csv", mode="r", encoding="utf-8") as file:
+        rows = csv.DictReader(file)
 
-    for row in rows:
-        new_student = Student(
-            name=row["name"],
-            major=row["major"],
-            course1=float(row["course1"]),
-            course2=float(row["course2"]),
-            course3=float(row["course3"]),
-            average=float(row["average"])
-        )
-        majors[new_student.major].append(new_student)
+        for row in rows:
+            new_student = Student(
+                name=row["name"],
+                major=row["major"],
+                course1=float(row["course1"]),
+                course2=float(row["course2"]),
+                course3=float(row["course3"]),
+                average=float(row["average"])
+            )
+
+            majors[new_student.major].append(new_student)
+
+except FileNotFoundError:
+    raise StudentFileNotFoundError(
+        "The student data file 'test.csv' was not found."
+    )
+
+except PermissionError:
+    raise StudentFilePermissionError(
+        "Permission denied when trying to read 'test.csv'."
+    )
 
 
 def calculate_major_statistics(major):
@@ -229,4 +242,11 @@ def show_menu():
             print("Invalid option. Please choose 1, 2, 3, 4, or 5.")
 
 
-show_menu()
+try:
+    show_menu()
+
+except StudentFileNotFoundError as error:
+    print(f"Error: {error}")
+
+except StudentFilePermissionError as error:
+    print(f"Error: {error}")
