@@ -1,34 +1,27 @@
 
 import csv
 import json
-from collections import Counter, OrderedDict, defaultdict, deque
-from dataclasses import dataclass
 from pathlib import Path
+from dataclasses import dataclass
+from collections import defaultdict, deque, Counter
 from statistics import median
-from typing import Dict, List, Optional, TypedDict, Union
+from typing import List, Dict, Optional, Union, TypedDict
 
-from exceptions import (
-    StudentFileNotFoundError,
-    StudentFilePermissionError,
-)
+from exceptions import StudentFileNotFoundError, StudentFilePermissionError
 
-# Grades can be whole numbers or decimals.
+
+# A grade can be an integer or a decimal number.
 Grade = Union[int, float]
 
-# Define the columns that must exist in the CSV file.
+# These columns must exist in the CSV file.
 REQUIRED_COLUMNS = {
-    "name",
-    "major",
-    "course1",
-    "course2",
-    "course3",
-    "average",
+    "name", "major", "course1", "course2", "course3", "average"
 }
 
 
 @dataclass
 class Student:
-    """Store a student's details and grades."""
+    """Store a student's name, major, grades, and average."""
 
     name: str
     major: str
@@ -40,22 +33,22 @@ class Student:
 
 @dataclass
 class Course:
-    """Store a course's total grade and number of students."""
+    """Store the total grades and number of students in a course."""
 
     total: float
     no_of_students: int
 
     def calculate_average(self) -> float:
-        """Calculate the average grade, avoiding division by zero."""
+        """Calculate the average grade for the course."""
         if self.no_of_students == 0:
             return 0.0
 
         return self.total / self.no_of_students
 
 
-# TypedDict documents the expected structure of the JSON report.
+# TypedDict describes the expected structure of the JSON report.
 class CourseAverages(TypedDict):
-    """Store statistics for the three courses."""
+    """Store averages or medians for the three courses."""
 
     course1: float
     course2: float
@@ -81,10 +74,9 @@ class MajorReport(TypedDict):
 
 
 class RankingEntry(TypedDict):
-    """Describe one student's position in the rankings."""
+    """Describe one student in a ranking report."""
 
     rank: int
-    percentile: float
     name: str
     major: str
     course1: float
@@ -93,53 +85,50 @@ class RankingEntry(TypedDict):
     average: float
 
 
-# defaultdict automatically creates an empty list for each new major.
+# defaultdict creates an empty list automatically for each new major.
 majors: Dict[str, List[Student]] = defaultdict(list)
 
 
 def load_students(file_path: Union[str, Path] = "test.csv") -> None:
-    """Read student records, validate the CSV, and group students by major."""
+    """Read, validate, and group student records from a CSV file."""
     majors.clear()
-    path = Path(file_path)
 
     try:
-        with path.open(mode="r", encoding="utf-8", newline="") as file:
-            reader = csv.DictReader(file)
+        with open(file_path, mode="r", encoding="utf-8", newline="") as file:
+            rows = csv.DictReader(file)
 
-            # A CSV must have a header row.
-            if reader.fieldnames is None:
-                raise ValueError("The CSV file is empty or has no header row.")
+            # Check that the file contains a header row.
+            if rows.fieldnames is None:
+                raise ValueError("The CSV file is empty or has no header.")
 
-            # Remove surrounding spaces from column names.
-            reader.fieldnames = [
-                name.strip() if name else ""
-                for name in reader.fieldnames
+            # Remove extra spaces around column names.
+            rows.fieldnames = [
+                name.strip() if name else "" for name in rows.fieldnames
             ]
 
-            missing_columns = REQUIRED_COLUMNS - set(reader.fieldnames)
+            missing_columns = REQUIRED_COLUMNS - set(rows.fieldnames)
 
             if missing_columns:
-                missing = ", ".join(sorted(missing_columns))
                 raise ValueError(
-                    f"CSV is missing required columns: {missing}"
+                    "Missing CSV columns: "
+                    + ", ".join(sorted(missing_columns))
                 )
 
-            for row_number, row in enumerate(reader, start=2):
-                # Ignore completely blank rows.
-                if not row or all(
-                    not value or not value.strip()
+            for row_number, row in enumerate(rows, start=2):
+                # Skip completely blank rows.
+                if all(
+                    value is None or not value.strip()
                     for value in row.values()
-                    if value is not None
                 ):
                     continue
 
-                # Reject rows with extra values that have no column name.
+                # None as a key means the row contains extra values.
                 if None in row:
                     raise ValueError(
                         f"Row {row_number} contains too many values."
                     )
 
-                # Check that required fields contain values.
+                # Check that required fields are not empty.
                 for column in REQUIRED_COLUMNS:
                     value = row.get(column)
 
@@ -147,9 +136,6 @@ def load_students(file_path: Union[str, Path] = "test.csv") -> None:
                         raise ValueError(
                             f"Row {row_number}: '{column}' cannot be empty."
                         )
-
-                name = row["name"].strip()
-                major = row["major"].strip()
 
                 try:
                     course1 = float(row["course1"])
@@ -159,21 +145,12 @@ def load_students(file_path: Union[str, Path] = "test.csv") -> None:
                 except ValueError as error:
                     raise ValueError(
                         f"Row {row_number}: grades and average "
-                        "must be numbers."
+                        "must be numeric."
                     ) from error
 
                 grades = [course1, course2, course3, supplied_average]
 
-                # Reject NaN, infinity, and grades outside the valid range.
-                if any(
-                    not 0 <= grade <= 100
-                    for grade in grades
-                    if grade == grade and abs(grade) != float("inf")
-                ):
-                    raise ValueError(
-                        f"Row {row_number}: grades must be between 0 and 100."
-                    )
-
+                # Reject NaN and infinity, which are not valid grades.
                 if any(
                     grade != grade or abs(grade) == float("inf")
                     for grade in grades
@@ -182,19 +159,26 @@ def load_students(file_path: Union[str, Path] = "test.csv") -> None:
                         f"Row {row_number}: grades must be finite numbers."
                     )
 
-                # Calculate the average from the three course grades so
-                # rankings do not depend on an incorrect CSV average.
-                calculated_average = (course1 + course2 + course3) / 3
-
-                # Warn when the supplied average does not match the grades.
-                if abs(supplied_average - calculated_average) > 0.02:
-                    print(
-                        f"Warning: row {row_number}'s supplied average "
-                        "does not match its course grades. "
-                        "The calculated average will be used."
+                # Grades must be between 0 and 100.
+                if any(grade < 0 or grade > 100 for grade in grades):
+                    raise ValueError(
+                        f"Row {row_number}: grades must be between 0 and 100."
                     )
 
-                student = Student(
+                name = row["name"].strip()
+                major = row["major"].strip()
+
+                # Calculate the average from the three course grades.
+                calculated_average = (course1 + course2 + course3) / 3
+
+                if abs(supplied_average - calculated_average) > 0.02:
+                    print(
+                        f"Warning: row {row_number}'s average does not "
+                        "match its course grades. The calculated average "
+                        "will be used."
+                    )
+
+                new_student = Student(
                     name=name,
                     major=major,
                     course1=course1,
@@ -203,18 +187,19 @@ def load_students(file_path: Union[str, Path] = "test.csv") -> None:
                     average=calculated_average,
                 )
 
-                majors[student.major].append(student)
+                majors[new_student.major].append(new_student)
 
     except FileNotFoundError as error:
         raise StudentFileNotFoundError(
-            f"Student data file '{path}' was not found."
+            f"The student data file '{file_path}' was not found."
         ) from error
 
     except PermissionError as error:
         raise StudentFilePermissionError(
-            f"Permission denied when reading '{path}'."
+            f"Permission denied when trying to read '{file_path}'."
         ) from error
 
+    # Do not start the menu if there are no usable student records.
     if not majors:
         raise ValueError("The CSV file contains no student records.")
 
@@ -222,31 +207,24 @@ def load_students(file_path: Union[str, Path] = "test.csv") -> None:
 def get_grade_distributions_per_course(
     course_results: Union[List[Grade], deque],
 ) -> Dict[str, int]:
-    """Count grades in predefined score ranges using Counter."""
-    # Use the original numeric grade, preserving decimal boundaries.
-    distribution = Counter()
+    """Count grades in the predefined score ranges using Counter."""
+    grade_distribution = Counter(
+        "0-40" if 0 <= int(grade) <= 40
+        else "41-50" if int(grade) <= 50
+        else "51-60" if int(grade) <= 60
+        else "61-70" if int(grade) <= 70
+        else "71-80" if int(grade) <= 80
+        else "81-100"
+        for grade in course_results
+    )
 
-    for grade in course_results:
-        if 0 <= grade <= 40:
-            band = "0-40"
-        elif grade <= 50:
-            band = "41-50"
-        elif grade <= 60:
-            band = "51-60"
-        elif grade <= 70:
-            band = "61-70"
-        elif grade <= 80:
-            band = "71-80"
-        else:
-            band = "81-100"
-
-        distribution[band] += 1
-
-    return dict(distribution)
+    return dict(grade_distribution)
 
 
-def calculate_median(grades: Union[List[Grade], deque]) -> float:
-    """Return the middle grade, or the mean of the two middle grades."""
+def calculate_median(
+    grades: Union[List[Grade], deque],
+) -> float:
+    """Calculate the median grade."""
     if not grades:
         return 0.0
 
@@ -256,20 +234,19 @@ def calculate_median(grades: Union[List[Grade], deque]) -> float:
 def calculate_mode(
     grades: Union[List[Grade], deque],
 ) -> Optional[Grade]:
-    """Return the most frequent grade, or None when no grades exist."""
+    """Return the most frequent grade, or None if there are no grades."""
     grade_counts = Counter(grades)
 
     if not grade_counts:
         return None
 
-    # If several grades tie, Counter returns the first encountered grade.
     return grade_counts.most_common(1)[0][0]
 
 
 def calculate_major_statistics(major: str) -> MajorReport:
     """Calculate averages, medians, modes, and distributions for a major."""
     if major not in majors or not majors[major]:
-        raise ValueError(f"No students were found for major '{major}'.")
+        raise ValueError(f"No students found for major '{major}'.")
 
     course_1_results = deque()
     course_2_results = deque()
@@ -280,7 +257,7 @@ def calculate_major_statistics(major: str) -> MajorReport:
         course_2_results.append(student.course2)
         course_3_results.append(student.course3)
 
-    # Keep decimal grades instead of converting them to integers.
+    # Sum the original grades to preserve decimal values.
     course_1 = Course(sum(course_1_results), len(course_1_results))
     course_2 = Course(sum(course_2_results), len(course_2_results))
     course_3 = Course(sum(course_3_results), len(course_3_results))
@@ -289,7 +266,7 @@ def calculate_major_statistics(major: str) -> MajorReport:
     course_2_average = course_2.calculate_average()
     course_3_average = course_3.calculate_average()
 
-    # Each course contributes equally to the overall major average.
+    # Calculate the mean of the three course averages.
     major_average = (
         course_1_average + course_2_average + course_3_average
     ) / 3
@@ -308,9 +285,9 @@ def calculate_major_statistics(major: str) -> MajorReport:
 
     return {
         "course_averages": {
-            "course1": round(course_1_average, 2),
-            "course2": round(course_2_average, 2),
-            "course3": round(course_3_average, 2),
+            "course1": course_1_average,
+            "course2": course_2_average,
+            "course3": course_3_average,
         },
         "overall_average": round(major_average, 2),
         "course_medians": course_medians,
@@ -330,7 +307,7 @@ def calculate_major_statistics(major: str) -> MajorReport:
 
 
 def show_averages() -> None:
-    """Print course averages and other statistics for every major."""
+    """Print course and overall averages, medians, and modes."""
     for major in majors:
         stats = calculate_major_statistics(major)
 
@@ -344,73 +321,52 @@ def show_averages() -> None:
         print("Course modes:", stats["course_modes"])
 
 
-def calculate_percentile(rank: int, total_students: int) -> float:
-    """Calculate percentile from rank, with rank 1 representing the top."""
-    if total_students <= 1:
-        return 100.0
-
-    return round(
-        (total_students - rank) / (total_students - 1) * 100,
-        2,
+def generate_rankings(major: str) -> None:
+    """Print students in descending order of their average grade."""
+    ranked_list = sorted(
+        majors[major],
+        key=lambda student: student.average,
+        reverse=True,
     )
 
+    print("\n-------------------- Ranked Performance List --------------------")
+    print("Rank  Name  Course 1  Course 2  Course 3  Average")
 
-def build_rankings(major: str) -> List[RankingEntry]:
-    """Return students sorted by average, including their percentiles."""
-    if major not in majors or not majors[major]:
-        raise ValueError(f"No students were found for major '{major}'.")
+    for index, student in enumerate(ranked_list, start=1):
+        print(
+            f"{index}. {student.name}  "
+            f"{student.course1}  "
+            f"{student.course2}  "
+            f"{student.course3}  "
+            f"{student.average}"
+        )
 
-    ranked_students = sorted(
+
+def generate_rankings_json(major: str) -> None:
+    """Save a major's student rankings as a JSON file."""
+    ranked_list = sorted(
         majors[major],
         key=lambda student: student.average,
         reverse=True,
     )
 
     report: List[RankingEntry] = []
-    total_students = len(ranked_students)
 
-    for rank, student in enumerate(ranked_students, start=1):
+    for index, student in enumerate(ranked_list, start=1):
         report.append({
-            "rank": rank,
-            "percentile": calculate_percentile(rank, total_students),
+            "rank": index,
             "name": student.name,
             "major": student.major,
             "course1": student.course1,
             "course2": student.course2,
             "course3": student.course3,
-            "average": round(student.average, 2),
+            "average": student.average,
         })
-
-    return report
-
-
-def generate_rankings(major: str) -> None:
-    """Print the ranking report for a major."""
-    report = build_rankings(major)
-
-    print(
-        "\n-------------------- Ranked Performance List "
-        "--------------------"
-    )
-    print("Rank  Name  Course 1  Course 2  Course 3  Average  Percentile")
-
-    for student in report:
-        print(
-            f"{student['rank']}. {student['name']}  "
-            f"{student['course1']}  {student['course2']}  "
-            f"{student['course3']}  {student['average']}  "
-            f"{student['percentile']}%"
-        )
-
-
-def generate_rankings_json(major: str) -> None:
-    """Save the ranking report for a major as a JSON file."""
-    report = build_rankings(major)
 
     report_path = Path("reports")
     report_path.mkdir(parents=True, exist_ok=True)
 
-    # Replace spaces so the major name can be used in a filename.
+    # Replace spaces in the major name to create a valid filename.
     safe_major_name = major.replace(" ", "_")
     file_path = report_path / f"{safe_major_name}_rankings.json"
 
@@ -421,9 +377,8 @@ def generate_rankings_json(major: str) -> None:
 
 
 def generate_json_report() -> None:
-    """Save statistics for all majors in one JSON report."""
-    # OrderedDict explicitly preserves the order in which majors are added.
-    report: Dict[str, MajorReport] = OrderedDict()
+    """Save statistics for all majors in a JSON report."""
+    report: Dict[str, MajorReport] = {}
 
     for major in majors:
         report[major] = calculate_major_statistics(major)
@@ -438,56 +393,8 @@ def generate_json_report() -> None:
     print(f"Grade report saved to: {file_path}")
 
 
-def calculate_rolling_averages(
-    grades: List[Grade],
-    window: int,
-) -> List[float]:
-    """Calculate a rolling average using the most recent grades."""
-    if window <= 0:
-        raise ValueError("The rolling-average window must be greater than 0.")
-
-    recent_grades = deque(maxlen=window)
-    averages = []
-
-    for grade in grades:
-        recent_grades.append(grade)
-        averages.append(round(sum(recent_grades) / len(recent_grades), 2))
-
-    return averages
-
-
-def show_rolling_averages() -> None:
-    """Display rolling averages for a selected major and course."""
-    major = input("Enter the major: ").strip()
-
-    if major not in majors:
-        print("Major not found.")
-        return
-
-    course = input("Enter course (course1, course2, or course3): ").strip()
-
-    if course not in {"course1", "course2", "course3"}:
-        print("Invalid course name.")
-        return
-
-    try:
-        window = int(input("Enter rolling-average window size: "))
-        if window <= 0:
-            print("Window size must be greater than 0.")
-            return
-    except ValueError:
-        print("Window size must be a whole number.")
-        return
-
-    grades = [getattr(student, course) for student in majors[major]]
-    averages = calculate_rolling_averages(grades, window)
-
-    print(f"Rolling averages for {major}, {course}:")
-    print(averages)
-
-
 def show_grade_distributions() -> None:
-    """Print grade distributions for each course in a selected major."""
+    """Print grade distributions for a major selected by the user."""
     major = input("Enter the major: ").strip()
 
     if major not in majors:
@@ -495,24 +402,38 @@ def show_grade_distributions() -> None:
         return
 
     students = majors[major]
+
     print(f"\nGrade distributions for {major}")
 
-    for course in ("course1", "course2", "course3"):
-        grades = [getattr(student, course) for student in students]
-        distribution = get_grade_distributions_per_course(grades)
-        print(f"{course}: {distribution}")
+    print(
+        "Course 1:",
+        get_grade_distributions_per_course(
+            [student.course1 for student in students]
+        ),
+    )
+    print(
+        "Course 2:",
+        get_grade_distributions_per_course(
+            [student.course2 for student in students]
+        ),
+    )
+    print(
+        "Course 3:",
+        get_grade_distributions_per_course(
+            [student.course3 for student in students]
+        ),
+    )
 
 
 def show_menu() -> None:
-    """Display the menu and handle the user's choices."""
+    """Display the menu and respond to the user's selection."""
     while True:
         print("\n===== Student Grade Analytics Tool =====")
         print("1. View course and major averages")
         print("2. Generate student rankings")
         print("3. View grade distributions")
         print("4. Generate JSON report")
-        print("5. View rolling averages")
-        print("6. Exit")
+        print("5. Exit")
 
         choice = input("Choose an option: ").strip()
 
@@ -535,18 +456,15 @@ def show_menu() -> None:
             generate_json_report()
 
         elif choice == "5":
-            show_rolling_averages()
-
-        elif choice == "6":
             print("Goodbye!")
             break
 
         else:
-            print("Invalid choice. Please choose a number from 1 to 6.")
+            print("Invalid choice. Please try again.")
 
 
 def main() -> None:
-    """Load student data and start the application."""
+    """Load the student records and start the menu."""
     try:
         load_students("test.csv")
         show_menu()
